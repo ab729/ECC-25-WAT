@@ -1,0 +1,158 @@
+P = 1073741789
+F = GF(P)
+a = F(382183198)
+b = F(410736703)
+ 
+E = EllipticCurve([a,b])
+print(E)
+ 
+x = F(431583365)
+y = F(858920426)
+ 
+Gene = E([x,y])
+
+
+r = 1073759053
+ 
+ 
+alpha = randint(2, r-1)
+
+
+ 
+ 
+def LtR_Montgomry(Gene, alpha):
+	if (alpha == 0):
+		return E(0)
+	else:
+		binary = bin(alpha)
+		binary = binary[3:]
+		length = len(binary)
+		R0= Gene
+		R1=2*Gene
+		for i in range(length):
+			if (binary[i] == '1'):
+				R0 = R0 + R1
+				R1 = 2*R1
+			else:
+				R1 = R0 + R1
+				R0 = 2*R0
+	return R0
+
+def rho_func(k, Gene, Q, r):
+	list_of_points =  []
+	list_of_ghama1 = []
+	list_of_ghama2 = []
+
+	for i in range(k):
+		ghama1 = randint(2, r-1)
+		ghama2 = randint(2, r-1)
+	
+		Po1 = LtR_Montgomry(Gene, ghama1)
+		Po2 = LtR_Montgomry(Q, ghama2)
+		t = Po1 + Po2
+		list_of_points.append(t)
+		list_of_ghama1.append(ghama1)
+		list_of_ghama2.append(ghama2)
+		
+	return list_of_points, list_of_ghama1, list_of_ghama2
+
+
+def pollard_rho_abc(Gene, Q, r):
+	def partition(P):
+		return P[0] % 3  
+	
+	a1, b1 = randint(1, r-1), randint(1, r-1)
+	a2, b2 = a1, b1
+	P1 = a1 * Gene + b1 * Q
+	P2 = P1
+	
+	while True:
+		if partition(P1) == 0:
+			a1 = (a1 + 1) % r
+			P1 = P1 + Gene
+		elif partition(P1) == 1:
+			b1 = (b1 + 1) % r
+			P1 = P1 + Q
+		else:
+			a1 = (2 * a1) % r
+			b1 = (2 * b1) % r
+			P1 = 2 * P1
+
+		for _ in range(2):
+			if partition(P2) == 0:
+				a2 = (a2 + 1) % r
+				P2 = P2 + Gene
+			elif partition(P2) == 1:
+				b2 = (b2 + 1) % r
+				P2 = P2 + Q
+			else:
+				a2 = (2 * a2) % r
+				b2 = (2 * b2) % r
+				P2 = 2 * P2
+
+		if P1 == P2:
+			numerator = (a1 - a2) % r
+			denominator = (b2 - b1) % r
+
+			if denominator == 0:
+				print("Denominator is zero, try new values.")
+				return None
+			
+			alpha = (numerator * inverse_mod(denominator, r)) % r
+			return alpha
+
+	print("Increase iterations for better collision probability.")
+	return None
+
+def mapping(point, k):
+	res = (int(point[0])) % k
+	return res
+
+
+def collision(points, ghamas1, ghamas2, Gene, Q, r, k):
+	
+	a1, b1 = randint(1, r-1), randint(1, r-1)
+	a2, b2 = a1, b1
+	P1 = a1 * Gene + b1 * Q
+	P2 = P1
+	
+	while True:
+		direction = mapping(P1, k)
+		a1 = (a1+ghamas1[direction]) % r
+		b1 = (b1+ghamas2[direction]) % r
+		
+		P1 = P1 + points[direction]
+		
+		direction = mapping(P1, k)
+		a1 = (a1+ghamas1[direction]) % r
+		b1 = (b1+ghamas2[direction]) % r
+		
+		P1 = P1 + points[direction]
+		
+		direction = mapping(P2, k)
+		a2 = (a2+ghamas1[direction]) % r
+		b2 = (b2+ghamas2[direction]) % r
+		
+		P2 = P2 + points[direction]
+		
+		if (P1 == P2):
+			print("Found")
+			break
+
+	m = (b1-b2) % r
+	if (m == 0):
+		print("Run the algorithm again and find another value")
+	else:
+		point_of_coll = ((a2-a1) * inverse_mod(m, r) ) % r
+		return point_of_coll
+
+
+Q = LtR_Montgomry(Gene, alpha)
+print(alpha)
+k = 17
+points, ghamas1, ghamas2 = rho_func(k, Gene, Q, r)
+
+
+sol = collision(points, ghamas1, ghamas2, Gene, Q, r, k)
+print(sol)
+print(sol==alpha)
