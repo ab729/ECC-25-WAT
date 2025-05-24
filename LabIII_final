@@ -1,0 +1,93 @@
+p = 2^384 - 2^128 - 2^96 + 2^32 - 1
+a = -3
+b = int("b3312fa7e23ee7e4988e056be3f82d19181d9c6efe8141120314088f5013875a"
+        "c656398d8a2ed19d2a85c8edd3ec2aef", 16)
+Gx = int("aa87ca22be8b05378eb1c71ef320ad746e1d3b628ba79b9859f741e082542a38"
+         "5502f25dbf55296c3a545e3872760ab7", 16)
+Gy = int("3617de4a96262c6f5d9e98bf9292dc29f8f41dbd289a147ce9da3113b5f0b8c0"
+         "0a60b1ce1d7e819d7a431d7c90ea0e5f", 16)
+n = int("ffffffffffffffffffffffffffffffffffffffffffffffffc7634d81f4372ddf"
+        "581a0db248b0a77aecec196accc52973", 16)
+F = FiniteField(p)
+E = EllipticCurve(F, [F(a), F(b)])
+G = E(F(Gx), F(Gy))
+
+from random import randint
+import hashlib
+
+def LtR_Montgomry(Gene, alpha):
+    if alpha == 0:
+        return E(0)
+    binary = bin(alpha)[3:]
+    R0 = Gene
+    R1 = 2 * Gene
+    for bit in binary:
+        if bit == '1':
+            R0 = R0 + R1
+            R1 = 2 * R1
+        else:
+            R1 = R0 + R1
+            R0 = 2 * R0
+    return R0
+
+def hash_message(message):
+    digest = hashlib.sha384(message).digest()
+    return Integer(digest.hex(), 16) % n
+
+def generate_signature(message, private_key):
+    m = hash_message(message)
+    r = 0
+    s = 0
+    while r == 0 or s == 0:
+        k = randint(1, n - 1)
+        R = LtR_Montgomry(G, k)
+        r = Integer(R[0]) % n
+        if r != 0:
+            k_inv = inverse_mod(k, n)
+            s = (k_inv * (m + r * private_key)) % n
+    return (r, s)
+
+def verify_signature(message, signature, public_key):
+    r, s = signature
+    if r <= 0 or r >= n or s <= 0 or s >= n:
+        return False
+    w = inverse_mod(s, n)
+    m = hash_message(message)
+    u1 = (m * w) % n
+    u2 = (r * w) % n
+    P = LtR_Montgomry(G, u1) + LtR_Montgomry(public_key, u2)
+    v = Integer(P[0]) % n
+    return v == r
+
+def print_all(message, priv_key, pub_key, signature):
+    print("\n--- Test Case Details ---")
+    print(f"Message: {message.decode()}")
+    print(f"Private Key d: {priv_key}")
+    print(f"Public Key Q: ({pub_key[0]}, {pub_key[1]})")
+    r, s = signature
+    print(f"Signature r: {r}")
+    print(f"Signature s: {s}")
+    print(f"Verification result: {verify_signature(message, signature, pub_key)}")
+    print("-------------------------")
+
+# Key generation for first user
+d1 = randint(1, n - 1)
+Q1 = LtR_Montgomry(G, d1)
+
+# Test 1: Valid signature with original keys
+msg1 = b"Hello from SageMath using NIST P-384!"
+sig1 = generate_signature(msg1, d1)
+print_all(msg1, d1, Q1, sig1)
+
+# Test 2: Invalid signature - different message but same signature and key
+msg2 = b"Hello from SageMath with a different message!"
+print_all(msg2, d1, Q1, sig1)
+
+# Test 3: Invalid signature - different public key, same signature and original message
+d2 = randint(1, n - 1)
+Q2 = LtR_Montgomry(G, d2)
+print_all(msg1, d1, Q2, sig1)
+
+# Test 4: Invalid signature - different signature with different private key, original message and original public key
+sig2 = generate_signature(msg1, d2)
+print_all(msg1, d2, Q1, sig2)
