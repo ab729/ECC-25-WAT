@@ -1,0 +1,111 @@
+from hashlib import sha3_512
+from random import randint
+
+# setting the domain params
+p = 2^521 - 1
+a = -3
+b = Integer("0051953eb9618e1c9a1f929a21a0b68540eea2da725b99b315f3b8b489918ef109e156193951ec7e937b1652c0bd3bb1bf073573df883d2c34f1ef451fd46b503f00", 16)
+Gx = Integer("00c6858e06b70404e9cd9e3ecb662395b4429c648139053fb521f828af606b4d3dbaa14b5e77efe75928fe1dc127a2ffa8de3348b3c1856a429bf97e7e31c2e5bd66", 16)
+Gy = Integer("011839296a789a3bc0045c8a5fb42c7d1bd998f54449579b446817afbd17273e662c97ee72995ef42640c550b9013fad0761353c7086a272c24088be94769fd16650", 16)
+n = Integer("01fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffa51868783bf2f966b7fcc0148f709a5d03bb5c9b8899c47aebb6fb71e91386409", 16)
+
+# create elliptic curve and generator
+F = FiniteField(p)
+E = EllipticCurve(F, [a, b])
+G = E(Gx, Gy)
+
+# Generating key pair (private, public)
+def generate_key_pair():
+    k = randint(1, n - 1)
+    Q = inverse_mod(k, n) * G
+    return k, Q
+
+k, Q = generate_key_pair()
+
+# Compute hcert - I missed it last time :(
+def compute_hcert(identifier, Q):
+    domain_string = "p=" + str(p) + ", a=" + str(a) + ", b=" + str(b) + ", G=(" + str(Gx) + "," + str(Gy) + "), n=" + str(n)
+    pubkey_string = f"Q=({Q[0]},{Q[1]})"
+    combined = identifier + domain_string + pubkey_string
+    return Integer(sha3_512(combined.encode()).hexdigest(), 16)
+
+identifier = "Ahmed_ECKCDSA_Signer"
+hcert = compute_hcert(identifier, Q)
+
+# Sign a message
+def sign_message(m, k):
+    # Choose d in [2, r - 2]
+    d = randint(2, n - 2)
+    R = d * G
+    x1 = Integer(R[0])
+
+    # Compute t = H(x1)
+    t = Integer(sha3_512(str(x1).encode()).hexdigest(), 16) % n
+
+    # Compute e = H(hcert, m)
+    data = str(hcert) + m
+    e = Integer(sha3_512(data.encode()).hexdigest(), 16) % n
+
+    # Compute w = t XOR e and reduce
+    w = t ^^ e
+    if w >= n:
+        w -= n
+
+    # s = k(d − w) mod n
+    diff = (d - w) % n
+    s = (k * diff) % n
+    if s == 0:
+        return sign_message_eckcdsa(m, k, Q)  # retry if s = 0
+
+    return (t, s)
+
+# Verify signature
+def verify_signature(m, sig, Q_check):
+    t, s = sig
+    if not (1 <= t < n and 1 <= s < n):
+        return False
+    # Compute e = H(hcert, m)
+    data = str(hcert) + m
+    e = Integer(sha3_512(data.encode()).hexdigest(), 16) % n
+
+    # Compute w = t XOR e and reduce
+    w = t ^^ e
+    if w >= n:
+        w -= n
+    # Compute X = [s]Q + [w]G
+    X = s*Q_check + w * G
+
+    x1 = Integer(X[0])
+
+    # Compute t = H(x1)
+	
+    # Compute v = H(x1) where x1 is the x-coordinate of X .
+    v = Integer(sha3_512(str(x1).encode()).hexdigest(), 16) % n
+    '''
+    If v = t then return(”Accept the signature”); Else return(”Reject the
+    signature”)
+    '''
+    if v == t:
+        return "Signature accepted"
+    else:
+        return "Rejected"
+
+# Test verification in three cases
+m = "This is a secret message"
+sig = sign_message(m, k)
+
+# Case I Correct verification
+print("Message is: ", m)
+print("signature is: ", sig)
+print("Case 1 – Correct message and public key:", verify_signature(m, sig, Q))
+
+# Case II Message changed
+m_prime = "This is a tampered message"
+new_m_sig = sign_message(m_prime, k)
+print("Case 2 – Modified message:", verify_signature(m_prime, sig, Q))
+print("signature is: ", new_m_sig)
+
+# Case III Public key changed
+_, Q_fake = generate_key_pair()
+print("Case 3 – Fake public key:", verify_signature(m, sig, Q_fake))
+print(Q_fake)
