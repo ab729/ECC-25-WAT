@@ -1,0 +1,163 @@
+import hashlib
+import hmac
+
+# EC domain params
+# NIST P-521 Domain Parameters
+p = 2**521 - 1  # Prime defining the field
+r = Integer("01fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffa51868783bf2f966b7fcc0148f709a5d03bb5c9b8899c47aebb6fb71e91386409", 16)  # Order
+a = -3  # Curve coefficient 'a'
+b = Integer("0051953eb9618e1c9a1f929a21a0b68540eea2da725b99b315f3b8b489918ef109e156193951ec7e937b1652c0bd3bb1bf073573df883d2c34f1ef451fd46b503f00", 16)  # Curve coefficient 'b'
+
+# Base Point (Generator)
+Gx = Integer("00c6858e06b70404e9cd9e3ecb662395b4429c648139053fb521f828af606b4d3dbaa14b5e77efe75928fe1dc127a2ffa8de3348b3c1856a429bf97e7e31c2e5bd66", 16)
+Gy = Integer("011839296a789a3bc0045c8a5fb42c7d1bd998f54449579b446817afbd17273e662c97ee72995ef42640c550b9013fad0761353c7086a272c24088be94769fd16650", 16)
+
+
+F = GF(p)  # Finite Field over p
+E = EllipticCurve(F, [a, b])
+G = E(Gx, Gy)  # Generator Point
+
+
+
+# Cofactor (h), we use 1 for NIST curves
+h = 1
+
+print("Elliptic Curve P-521 initialized successfully.")
+print("Field Prime (p):", p)
+print("Curve Coefficients (a, b):", a, b)
+print("Base Point (G):", G)
+print("Curve Order (r):", r)
+print("Cofactor (h):", h)
+
+# EC Functions
+def key_generation(G, r):
+    """Generate a random private key and corresponding public key."""
+    key = randint(2, r - 2)
+    Q = key * G
+    return key, Q
+
+def final_hash(msg):
+    """Compute the SHA3-512 hash of a given msg."""
+    return Integer(hashlib.sha3_512(msg.encode()).hexdigest(), 16)
+
+def signature_generation(key, msg, r, G):
+    """Generate a digital signature (t, s) for the msg."""
+    while True:
+        d = randint(2, r - 2)
+        dG = d * G
+        t = Integer(dG.xy()[0]) % r
+        e = final_hash(msg)
+        s = (inverse_mod(d, r) * (e + key * t)) % r
+        if t != 0 and s != 0:
+            return t, s
+
+def signature_verification(Q, msg, signature, r, G):
+    """Verify a digital signature for a given msg."""
+    t, s = signature
+    if not (1 <= t < r and 1 <= s < r):
+        return False
+
+    e = final_hash(msg)
+    w = inverse_mod(s, r)
+    u1 = (e * w) % r
+    u2 = (t * w) % r
+    X = u1 * G + u2 * Q
+
+    if X == E(0):
+        return False
+
+    return Integer(X.xy()[0]) % r == t
+
+def KDF(x2_bytes, hashfunc=hashlib.sha3_512):
+    """Key derivation function using SHA3-512."""
+    total_length = hashfunc().digest_size
+    counter = 1
+    output = b''
+
+    while len(output) < total_length:
+        ctr_bytes = counter.to_bytes(2, 'big')
+        output += hashfunc(ctr_bytes + x2_bytes).digest()
+        counter += 1
+
+    return output[:total_length]
+
+def MAC(key: bytes, *args, hashfunc=hashlib.sha3_512):
+    """Compute a msg authentication code (MAC)."""
+    msg = b''.join(args)
+    return hmac.new(key, msg, hashfunc).digest()
+
+# Key Generation
+nA, QA = key_generation(G, r)
+nB, QB = key_generation(G, r)
+dA, RA = key_generation(G, r)
+dB, RB = key_generation(G, r)
+
+ID_A = b"Alice"
+ID_B = b"Bob"
+
+print("Alice generated public keys RA:", RA, "QA:", QA)
+print("Bob generated public keys RB:", RB, "QB:", QB)
+
+# Bob computes Z_B
+Z_B = dB * RA
+if Z_B == E(0):
+    raise ValueError("Error: Z_B is point at infinity")
+xZ_B = int(Z_B.xy()[0])
+kB = KDF(xZ_B.to_bytes((xZ_B.bit_length() + 7) // 8, 'big'))
+k1_B, k2_B = kB[:32], kB[32:]
+
+print("Bob computed Z_B:", Z_B)
+print("Bob derived keys k1_B:", k1_B, "k2_B:", k2_B)
+
+msg_B = f"{RB.xy()[0]}{RA.xy()[0]}{ID_A.decode()}"
+sig_B = signature_generation(nB, msg_B, r, G)
+mac_B = MAC(k1_B, str(RB.xy()[0]).encode(), str(RA.xy()[0]).encode(), ID_A)
+
+print("Bob's signature:", sig_B)
+print("Bob's MAC:", mac_B)
+
+# Alice computes Z_A
+Z_A = dA * RB
+if Z_A == E(0):
+    raise ValueError("Error: Z_A is point at infinity")
+xZ_A = int(Z_A.xy()[0])
+kA = KDF(xZ_A.to_bytes((xZ_A.bit_length() + 7) // 8, 'big'))
+k1_A, k2_A = kA[:32], kA[32:]
+
+print("Alice computed Z_A:", Z_A)
+print("Alice derived keys k1_A:", k1_A, "k2_A:", k2_A)
+
+sig_valid = signature_verification(QB, msg_B, sig_B, r, G)
+mac_valid = MAC(k1_A, str(RB.xy()[0]).encode(), str(RA.xy()[0]).encode(), ID_A) == mac_B
+
+print("Bob's signature valid:", sig_valid)
+print("Bob's MAC valid:", mac_valid)
+
+msg_A = f"{RA.xy()[0]}{RB.xy()[0]}{ID_B.decode()}"
+sig_A = signature_generation(nA, msg_A, r, G)
+mac_A = MAC(k1_A, str(RA.xy()[0]).encode(), str(RB.xy()[0]).encode(), ID_B)
+
+print("Alice's signature:", sig_A)
+print("Alice's MAC:", mac_A)
+
+sigA_valid = signature_verification(QA, msg_A, sig_A, r, G)
+macA_valid = MAC(k1_B, str(RA.xy()[0]).encode(), str(RB.xy()[0]).encode(), ID_B) == mac_A
+
+print("Alice's signature valid:", sigA_valid)
+print("Alice's MAC valid:", macA_valid)
+print("Key agreement successful:", k2_A == k2_B)
+
+print("\n----------------------------------------------------------------------------------------------------------\n")
+# Failure case
+# corrupting Bob's signature
+print("This case to show that STS will deny connection as Bob' sig is corrupted")
+corrupted_sig_B = (sig_B[0], sig_B[1] + 1)  # Modify signature 's' value slightly
+
+# Alice tries to verify Bob's corrupted signature
+corrupted_sig_valid = signature_verification(QB, msg_B, corrupted_sig_B, r, G)
+
+print("Bob's CORRUPTED signature valid:", corrupted_sig_valid)
+print("Signature is: ", corrupted_sig_B)
+# If the signature verification fails, the STS connection should not be established
+if not corrupted_sig_valid:
+    print("Error: STS connection cannot be established due to invalid signature.")
